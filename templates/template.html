@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css?family=Quicksand:300,500" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h2>{{ newsletter_title }}</h2>
+    {% for paper in papers %}
+        <button class="accordion">
+            <table class="paper" style="width:100%">
+              <tr>
+                <td class="info">
+                    <span title="Title" class="title">{{ paper.title }}</span><br>
+                    <span title="Authors" class="authors">{{ paper.authors }}</span><br>
+                </td>
+                <td class="details">
+                    <span title="Score" class="score">{{ "%.2f"|format(paper.score) }}</span><br>
+                    <span title="Hit terms" class="hit_terms">{{ '[' + ', '.join(paper.hit_terms) + ']' }}</span>
+                </td>
+              </tr>
+            </table>
+        </button>
+        <div title="Abstract" class="panel">
+          <p>{{ paper.abstract }}<br>
+              <a class="url" href="{{ paper.arxiv_url }}">[arXiv]</a>
+              <a class="url" href="{{ paper.pdf_url }}">[PDF]</a>
+          </p>
+        </div>
+    {% endfor %}
+
+
+
+<script>
+var acc = document.getElementsByClassName("accordion");
+var i;
+
+for (i = 0; i < acc.length; i++) {
+  acc[i].addEventListener("click", function() {
+    this.classList.toggle("active");
+    var panel = this.nextElementSibling;
+    if (panel.style.display === "block") {
+      panel.style.display = "none";
+    } else {
+      panel.style.display = "block";
+    }
+  });
+}
+</script>
+
+</body>
+</html>
