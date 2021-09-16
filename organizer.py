@@ -18,13 +18,10 @@ from whoosh.analysis import StemmingAnalyzer
 from whoosh.fields import Schema, TEXT, ID
 from whoosh.index import create_in, open_dir
 from whoosh.qparser import QueryParser
-from whoosh.query import Every, Regex, Query
+from whoosh.query import Regex, Query
 from credentials import *
 from config import *
 import sys
-import itertools
-import hashlib, base64
-
 
 # add parent folder to python path for jinja to find it
 sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
@@ -115,7 +112,6 @@ def main():
         logging.debug(result['title'], result['arxiv_url'], result['authors'], '%.2f' % result.score,
                       '[' + ', '.join(hit_terms) + ']', sep=' | ')
 
-
     output_fn = output_dp / (nl.id + '.html')
     create_website(output_fn, nl.title, papers)
 
@@ -124,6 +120,7 @@ def main():
 def fetch_newsletter(server_name, username, password, mailfolder, last_n_newsletter):
   # create an IMAP4 class with SSL
   imap = imaplib.IMAP4_SSL(server_name)
+
   # authenticate
   imap.login(username, password)
   status, messages = imap.select(mailfolder)
