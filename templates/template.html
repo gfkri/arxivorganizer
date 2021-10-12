@@ -36,9 +36,12 @@
             </table>
         </button>
         <div title="Abstract" class="panel">
-          <p>{{ paper.abstract }}<br>
-              <a class="url" href="{{ paper.arxiv_url }}">[arXiv]</a>
-              <a class="url" href="{{ paper.pdf_url }}">[PDF]</a>
+          <p>{{ paper.abstract if paper.abstract else 'Abstract not available' }}<br>
+              {% if paper.arxiv_url %}
+                  <a class="url" href="{{ paper.arxiv_url }}">[arXiv]</a>
+                  <a class="url" href="{{ paper.pdf_url }}">[PDF]</a>
+              {% endif %}
+              <a class="url" href="{{ paper.gs_url }}">[Google Scholar]</a>
           </p>
         </div>
     {% endfor %}

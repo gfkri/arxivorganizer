@@ -1,38 +1,40 @@
-import csv
 import email
 import imaplib
 import logging
-import os
 import pathlib
 import re
+import shutil
+import urllib
 from datetime import datetime
 from email.header import decode_header
 from functools import reduce
 
 import arxiv
 import numpy as np
-import tqdm as tqdm
 import whoosh.query
 from jinja2 import Environment, PackageLoader, select_autoescape
 from recordclass import recordclass
 from whoosh import scoring
 from whoosh.analysis import StemmingAnalyzer
 from whoosh.fields import Schema, TEXT, ID
-from whoosh.index import create_in, open_dir
+from whoosh.index import create_in
 from whoosh.qparser import QueryParser
 from whoosh.query import Regex, Query
 from credentials import *
 from config import *
 import sys
-from fuzzywuzzy import fuzz
-
 
 # add parent folder to python path for jinja to find it
 sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
 
 logging.basicConfig(level=logging.INFO)
 PaperCollection = recordclass('PaperCollection', 'id title datetime papers')
-Paper = recordclass('Paper', 'id title abstract authors comment hit_terms score arxiv_url pdf_url')
+Paper = recordclass('Paper', 'id title abstract authors comment hit_terms score arxiv_url pdf_url gs_url')
+
+
+########################################################################################################################
+def create_gs_url(title):
+  return 'https://scholar.google.com/scholar?q=' + urllib.parse.quote_plus(title)
 
 
 ########################################################################################################################
@@ -49,28 +51,20 @@ def generate_website(fp, title, papers):
 
 
 ########################################################################################################################
-def main():
-  output_dp = pathlib.Path(OUTPUT_DIR)
-
-  newsletters = fetch_newsletter_from_imap(server_name=SERVER_NAME, username=USERNAME, password=PASSWORD,
-                                           mailfolder=MAIL_FOLDER, last_n_newsletter=LAST_N_NEWSLETTERS)
-
-  # add "overview newsletter" containing all papers, only reasonable if there are more than one newsletter
-  if CREATE_OVERVIEW and len(newsletters) > 1:
+def fetch_arxiv_info(newsletters):
+  for col in newsletters:
     papers = {}
-    for nl in newsletters:
-      papers.update(nl.papers)
+    search = arxiv.Search(id_list=col.papers, max_results=len(col.papers), sort_by=arxiv.SortCriterion.SubmittedDate)
+    results = list(search.results())
 
-    dates = [nl.datetime for nl in newsletters]
-    from_date, to_date = min(dates), max(dates)
-    title = 'Newsletter Overview [' + from_date.strftime("%Y-%m-%d") + ', ' + to_date.strftime("%Y-%m-%d") + '] ' + \
-            '(%d newsletter, %d papers)' % (len(newsletters), len(papers))
-
-    overview_id = 'ov_' + to_date.strftime("%Y%m%d%H%M") + ('_%dnl' % len(newsletters))
-    overview_collection = PaperCollection(id=overview_id, title=title, datetime=to_date, papers=papers)
-    newsletters.append(overview_collection)
-
-  sort_and_create(output_dp, newsletters)
+    for p in results:
+      authors = ', '.join([a.name for a in p.authors])
+      # search_string += tag
+      paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
+                    comment=p.comment, hit_terms=None, score=0.0, arxiv_url=p.entry_id, pdf_url=p.pdf_url,
+                    gs_url=create_gs_url(p.title))
+      papers[p.get_short_id()] = paper
+    col.papers = papers
 
 
 ########################################################################################################################
@@ -96,12 +90,14 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
   # search for keywords in each newsletter and create a website
   for col in collections:
     msg_index_dp = index_dp / col.id
-    if not msg_index_dp.exists():
-      msg_index_dp.mkdir(parents=True)
-    ix = open_dir(str(msg_index_dp))
+    if msg_index_dp.exists():
+      shutil.rmtree(msg_index_dp)
+
+    msg_index_dp.mkdir(parents=True)
+    ix = create_in(str(msg_index_dp), schema)
+
     writer = ix.writer()
     for p in col.papers.values():
-      print(p.id)
       writer.add_document(id=p.id, title=p.title, abstract=p.abstract, authors=p.authors,
                           comment=p.comment, arxiv_url=p.arxiv_url, pdf_url=p.pdf_url)
     writer.commit()
@@ -132,10 +128,16 @@ def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last
   status, messages = imap.select(mailfolder)
   # total number of emails
   messages = int(messages[0])
+
+  if IMAP_SERVER_SUPPORTS_SORTING:
+    status, sort_order = imap.sort('DATE', 'UTF-8', 'ALL')
+    sort_order = sort_order[0].decode('utf-8').split(' ')
+  else:
+    sort_order = [str(i) for i in range(1, messages+1)]
+
   newsletters = []
-  for i in range(messages, messages - last_n_newsletter, -1):
-    res, msg = imap.fetch(str(i), '(RFC822)')
-    papers = {}
+  for i in range(messages - 1, messages - last_n_newsletter - 1, -1):
+    res, msg = imap.fetch(sort_order[i], '(RFC822)')
 
     for response in msg:
       if isinstance(response, tuple):
@@ -153,51 +155,42 @@ def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last
 
           body = msg.get_payload(decode=True).decode()
           ids = re.findall(r"(?<=arXiv:)\d{4}\.\d{5}", body)
-          search = arxiv.Search(id_list=ids, max_results=len(ids), sort_by=arxiv.SortCriterion.SubmittedDate)
-          results = list(search.results())
 
-          for r in results:
-            authors = ', '.join([a.name for a in r.authors])
-            # search_string += tag
-            paper = Paper(id=r.get_short_id(), title=r.title, abstract=r.summary.replace('\n', ' '), authors=authors,
-                          comment=r.comment, hit_terms=None, score=0.0, arxiv_url=r.entry_id, pdf_url=r.pdf_url)
-            papers[r.get_short_id()] = paper
-
-    title = subject + ' (' + msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers)' % len(papers))
-    newsletter = PaperCollection(msg_index_dn, title, msg_datetime, papers)
+    title = subject + ' (' + msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers)' % len(ids))
+    newsletter = PaperCollection(msg_index_dn, title, msg_datetime, ids)
     newsletters.append(newsletter)
   return newsletters
 
 
 ########################################################################################################################
-def fetch_newsletter_from_csv(csv_file, delimiter=',', quotechar='"', encoding=None, fuzzy_th=90,
-                              filter_fn=lambda x: True):
-  # fetches archive information from a csv, which needs to have field Title
-  papers = {}
-  with open(csv_file, newline='', encoding=encoding) as csvfile:
-    reader = csv.DictReader(csvfile, delimiter=delimiter, quotechar=quotechar)
-    for row in tqdm.tqdm(reader):
-      if filter_fn(row):
-        search = arxiv.Search(query='ti:%s' % row['Title'].replace(':', ''), max_results=10)
-        results = list(search.results())
+def main():
+  output_dp = pathlib.Path(OUTPUT_DIR)
 
-        for r in results:
-          if fuzz.ratio(row['Title'].lower(), r.title.lower()) > fuzzy_th:
-            authors = ', '.join([a.name for a in r.authors])
-            # search_string += tag
-            paper = Paper(id=r.get_short_id(), title=r.title, abstract=r.summary.replace('\n', ' '), authors=authors,
-                          comment=r.comment, hit_terms=None, score=0.0, arxiv_url=r.entry_id, pdf_url=r.pdf_url)
-            papers[r.get_short_id()] = paper
-            break
-  title = subject + ' (' + msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers)' % len(papers))
-  newsletter = PaperCollection(msg_index_dn, title, msg_datetime, papers)
-  newsletters.append(newsletter)
-  return papers
+  newsletters = fetch_newsletter_from_imap(server_name=SERVER_NAME, username=USERNAME, password=PASSWORD,
+                                           mailfolder=MAIL_FOLDER, last_n_newsletter=LAST_N_NEWSLETTERS)
+  if IGNORE_ALREADY_CREATED:
+    newsletters = [nl for nl in newsletters if not (output_dp / (nl.id + '.html')).exists()]
+
+  fetch_arxiv_info(newsletters)
+
+  # add "overview newsletter" containing all papers, only reasonable if there are more than one newsletter
+  if CREATE_OVERVIEW and len(newsletters) > 1:
+    papers = {}
+    for nl in newsletters:
+      papers.update(nl.papers)
+
+    dates = [nl.datetime for nl in newsletters]
+    from_date, to_date = min(dates), max(dates)
+    title = 'Newsletter Overview [' + from_date.strftime("%Y-%m-%d") + ', ' + to_date.strftime("%Y-%m-%d") + '] ' + \
+            '(%d newsletter, %d papers)' % (len(newsletters), len(papers))
+
+    overview_id = 'ov_' + to_date.strftime("%Y%m%d%H%M") + ('_%dnl' % len(newsletters))
+    overview_collection = PaperCollection(id=overview_id, title=title, datetime=to_date, papers=papers)
+    newsletters.append(overview_collection)
+
+  sort_and_create(output_dp, newsletters)
 
 
 ########################################################################################################################
 if __name__ == '__main__':
-  #csv_file = '/home/gfkri/Downloads/paper list per session.csv'
-  #papers = fetch_newsletter_from_csv(csv_file)
-
   main()
