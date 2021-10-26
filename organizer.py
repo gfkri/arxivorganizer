@@ -29,7 +29,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
 
 logging.basicConfig(level=logging.INFO)
 PaperCollection = recordclass('PaperCollection', 'id title datetime papers')
-Paper = recordclass('Paper', 'id title abstract authors comment hit_terms score arxiv_url pdf_url gs_url')
+Paper = recordclass('Paper', 'id title abstract authors comment published '
+                             'hit_terms score arxiv_url pdf_url gs_url')
 
 
 ########################################################################################################################
@@ -61,8 +62,8 @@ def fetch_arxiv_info(newsletters):
       authors = ', '.join([a.name for a in p.authors])
       # search_string += tag
       paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
-                    comment=p.comment, hit_terms=None, score=0.0, arxiv_url=p.entry_id, pdf_url=p.pdf_url,
-                    gs_url=create_gs_url(p.title))
+                    comment=p.comment, published=p.published, hit_terms=None, score=0.0, arxiv_url=p.entry_id,
+                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title))
       papers[p.get_short_id()] = paper
     col.papers = papers
 
