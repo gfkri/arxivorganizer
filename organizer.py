@@ -30,7 +30,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
 logging.basicConfig(level=logging.INFO)
 PaperCollection = recordclass('PaperCollection', 'id title datetime papers')
 Paper = recordclass('Paper', 'id title abstract authors comment published '
-                             'hit_terms score arxiv_url pdf_url gs_url')
+                             'hit_terms score arxiv_url pdf_url gs_url supp_url')
 
 
 ########################################################################################################################
@@ -53,19 +53,32 @@ def generate_website(fp, title, papers):
 
 ########################################################################################################################
 def fetch_arxiv_info(newsletters):
-  for col in newsletters:
-    papers = {}
-    search = arxiv.Search(id_list=col.papers, max_results=len(col.papers), sort_by=arxiv.SortCriterion.SubmittedDate)
-    results = list(search.results())
+  client = arxiv.Client(
+    page_size=1000,
+    delay_seconds=3,
+    num_retries=5
+  )
 
-    for p in results:
+  paper_id_list = [p for nl in newsletters for p in nl.papers]
+  paper_chunks = [paper_id_list[i:i + MAX_ARXIV_REQUESTS] for i in range(0, len(paper_id_list), MAX_ARXIV_REQUESTS)]
+  papers = []
+
+  for pchunk in paper_chunks:
+    search = arxiv.Search(id_list=pchunk, max_results=len(pchunk), sort_by=arxiv.SortCriterion.SubmittedDate)
+
+    for p in client.results(search):
       authors = ', '.join([a.name for a in p.authors])
       # search_string += tag
       paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
                     comment=p.comment, published=p.published, hit_terms=None, score=0.0, arxiv_url=p.entry_id,
-                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title))
-      papers[p.get_short_id()] = paper
-    col.papers = papers
+                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title), supp_url=None)
+      papers.append(paper)
+
+  cidx = 0
+  for nl in newsletters:
+    nl.papers = {p.id: p for p in papers[cidx:cidx+len(nl.papers)]}
+    cidx += len(nl.papers)
+
 
 
 ########################################################################################################################
@@ -99,7 +112,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
 
     writer = ix.writer()
     for p in col.papers.values():
-      writer.add_document(id=p.id, title=p.title, abstract=p.abstract, authors=p.authors,
+      writer.add_document(id=str(p.id), title=p.title, abstract=p.abstract, authors=p.authors,
                           comment=p.comment, arxiv_url=p.arxiv_url, pdf_url=p.pdf_url)
     writer.commit()
 
