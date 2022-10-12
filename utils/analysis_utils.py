@@ -49,6 +49,7 @@ def fetch_papers_from_csv(csv_file, delimiter=',', quotechar='"', encoding=None,
                           gs_url=create_gs_url(p.title), published=p.published, supp_url=None)
             papers[p.get_short_id()] = paper
             break
+          
   return {**papers, **not_found_papers}
 
 
@@ -151,7 +152,21 @@ def pc_github_analysis():
   newsletters = [PaperCollection('pc_github_2021', title, datetime.now(), papers)]
   sort_and_create(output_dp, newsletters, index_dp)
 
+########################################################################################################################
+def eccv_csv_analysis():
+  output_dp = pathlib.Path('.') / OUTPUT_DIR
+  index_dp = pathlib.Path('.') / INDEX_DIR
+  csv_file = 'data/eccv_2022.csv'
+
+  filter_fn = lambda x: True
+  # filter_fn = lambda x: x['Session #'] == 'Session 10'
+
+  papers = fetch_papers_from_csv(csv_file, filter_fn=filter_fn)
+  title = 'ECCV 2022 (%d papers)' % len(papers)
+  newsletters = [PaperCollection('eccv_2022', title, datetime.now(), papers)]
+  sort_and_create(output_dp, newsletters, index_dp)
+
 
 ########################################################################################################################
 if __name__ == '__main__':
-  oa_analysis()
+  eccv_csv_analysis()

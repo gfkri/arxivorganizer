@@ -1,7 +1,9 @@
-Whoosh==2.7.4
-Jinja2==3.0.1
-recordclass==0.13.2
-numpy==1.21.2
-beautifulsoup4==4.10.0
-requests==2.26.0
-python-Levenshtein==0.12.2
+Whoosh
+Jinja2
+recordclass
+numpy
+beautifulsoup4
+python-Levenshtein
+feedparser
+requests
+arxiv
