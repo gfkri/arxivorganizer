@@ -33,7 +33,7 @@ def fetch_papers_from_csv(csv_file, delimiter=',', quotechar='"', encoding=None,
         not_found_papers[row['Paper ID']] = Paper(id=row['Paper ID'], title=row['Title'], abstract=None,
                                                   authors=row['Authors'].replace(';', ','), comment='ICCV 2021',
                                                   published=None, hit_terms=None, score=0.0, arxiv_url=None,
-                                                  pdf_url=None, gs_url=create_gs_url(row['Title']), supp_url=None)
+                                                  pdf_url=None, gs_url=create_gs_url(row['Title']), supp_url=None, oa_url=None)
 
         logging.info(f"Searching for paper with title '{row['Title']}' ...")
         search = arxiv.Search(query='ti:%s' % row['Title'].replace(':', ''), max_results=10)
@@ -46,7 +46,7 @@ def fetch_papers_from_csv(csv_file, delimiter=',', quotechar='"', encoding=None,
             authors = ', '.join([a.name for a in p.authors])
             paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
                           comment=p.comment, hit_terms=None, score=0.0, arxiv_url=p.entry_id, pdf_url=p.pdf_url,
-                          gs_url=create_gs_url(p.title), published=p.published, supp_url=None)
+                          gs_url=create_gs_url(p.title), published=p.published, supp_url=None, oa_url=None)
             papers[p.get_short_id()] = paper
             break
           
@@ -65,7 +65,7 @@ def fetch_papers_from_text(text_file, encoding=None, fuzzy_th=90):
       not_found_papers[paper_id] = Paper(id=paper_id, title=title, abstract=None,
                                     authors='N/A', comment='',
                                     published=None, hit_terms=None, score=0.0, arxiv_url=None,
-                                    pdf_url=None, gs_url=create_gs_url(title), supp_url=None)
+                                    pdf_url=None, gs_url=create_gs_url(title), supp_url=None, oa_url=None)
 
       logging.info(f"Searching for paper with title '{title}' ...")
       search = arxiv.Search(query='ti:%s' % title.replace(':', ''), max_results=10)
@@ -78,7 +78,7 @@ def fetch_papers_from_text(text_file, encoding=None, fuzzy_th=90):
           authors = ', '.join([a.name for a in p.authors])
           paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
                         comment=p.comment, hit_terms=None, score=0.0, arxiv_url=p.entry_id, pdf_url=p.pdf_url,
-                        gs_url=create_gs_url(p.title), published=p.published, supp_url=None)
+                        gs_url=create_gs_url(p.title), published=p.published, supp_url=None, oa_url=None)
           papers[p.get_short_id()] = paper
           break
   return {**papers, **not_found_papers}
@@ -95,7 +95,8 @@ def openaccess_analysis(conference, conference_appendix):
   papers = {}
   for idx, (title, url) in tqdm(enumerate(results.items()), total=len(results)):
     paper_id = '%05d' % idx
-    page = requests.get(OPEN_ACCESS_URL + url)
+    oa_url = OPEN_ACCESS_URL + url
+    page = requests.get(oa_url)
     soup = BeautifulSoup(page.content, "html.parser")
     content = soup.find("div", {"id": "content"}).find('dl', recursive=False)
     abstract = content.find(id='abstract').text.strip()
@@ -109,7 +110,7 @@ def openaccess_analysis(conference, conference_appendix):
 
     paper = Paper(id=paper_id, title=title, abstract=abstract, authors=authors,
                   comment=conference, hit_terms=None, score=0.0, arxiv_url=arxiv_url, pdf_url=pdf_url,
-                  gs_url=create_gs_url(title), published=None, supp_url=supp_url)
+                  gs_url=create_gs_url(title), published=None, supp_url=supp_url, oa_url=oa_url)
     papers[paper_id] = paper
   return papers
 
@@ -118,11 +119,11 @@ def openaccess_analysis(conference, conference_appendix):
 def oa_analysis():
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  conference = 'CVPR2021'
-  conference_appendix = 'CVPR2021?day=all'
+  conference = 'CVPR2022'
+  conference_appendix = 'CVPR2022?day=all'
   papers = openaccess_analysis(conference, conference_appendix)
-  title = 'CVPR 2021 (%d papers)' % len(papers)
-  newsletters = [PaperCollection('cvpr_2021', title, datetime.now(), papers)]
+  title = 'CVPR 2022 (%d papers)' % len(papers)
+  newsletters = [PaperCollection('cvpr_2022', title, datetime.now(), papers)]
   sort_and_create(output_dp, newsletters, index_dp)
 
 
@@ -169,4 +170,4 @@ def eccv_csv_analysis():
 
 ########################################################################################################################
 if __name__ == '__main__':
-  eccv_csv_analysis()
+  oa_analysis()
