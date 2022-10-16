@@ -86,33 +86,34 @@ def fetch_papers_from_text(text_file, encoding=None, fuzzy_th=90):
 
 
 ########################################################################################################################
-def parse_openaccess(conference, conference_appendix):
-  page = requests.get(OPEN_ACCESS_URL + conference_appendix)
-  soup = BeautifulSoup(page.content, "html.parser")
-  results = soup.find_all("dt", {"class": "ptitle"})
-  results = [r.find('a') for r in results]
-  results = {r.text: r.attrs['href'] for r in results}
-
+def parse_openaccess(conference, conference_appendices):
   papers = {}
-  for idx, (title, url) in tqdm(enumerate(results.items()), total=len(results)):
-    paper_id = '%05d' % idx
-    pub_url = OPEN_ACCESS_URL + url
-    page = requests.get(pub_url)
+  for appendix in conference_appendices:
+    page = requests.get(OPEN_ACCESS_URL + appendix)
     soup = BeautifulSoup(page.content, "html.parser")
-    content = soup.find("div", {"id": "content"}).find('dl', recursive=False)
-    abstract = content.find(id='abstract').text.strip()
-    authors = content.find(id='authors').find('i').text
+    results = soup.find_all("dt", {"class": "ptitle"})
+    results = [r.find('a') for r in results]
+    results = {r.text: r.attrs['href'] for r in results}
 
-    links = content.find('dd', recursive=False)
-    links = {r.text: r.attrs['href'] for r in links.find_all('a', recursive=False) if 'href' in r.attrs}
-    pdf_url = (OPEN_ACCESS_URL + links['pdf'][1:]) if 'pdf' in links else None
-    supp_url = (OPEN_ACCESS_URL + links['supp'][1:]) if 'supp' in links else None
-    arxiv_url = links['arXiv'] if 'arXiv' in links else None
+    for idx, (title, url) in tqdm(enumerate(results.items()), total=len(results)):
+      paper_id = '%05d' % idx
+      pub_url = OPEN_ACCESS_URL + url
+      page = requests.get(pub_url)
+      soup = BeautifulSoup(page.content, "html.parser")
+      content = soup.find("div", {"id": "content"}).find('dl', recursive=False)
+      abstract = content.find(id='abstract').text.strip()
+      authors = content.find(id='authors').find('i').text
 
-    paper = Paper(id=paper_id, title=title, abstract=abstract, authors=authors,
-                  comment=conference, hit_terms=None, score=0.0, arxiv_url=arxiv_url, pdf_url=pdf_url,
-                  gs_url=create_gs_url(title), published=None, supp_url=supp_url, pub_url=pub_url)
-    papers[paper_id] = paper
+      links = content.find('dd', recursive=False)
+      links = {r.text: r.attrs['href'] for r in links.find_all('a', recursive=False) if 'href' in r.attrs}
+      pdf_url = (OPEN_ACCESS_URL + links['pdf'][1:]) if 'pdf' in links else None
+      supp_url = (OPEN_ACCESS_URL + links['supp'][1:]) if 'supp' in links else None
+      arxiv_url = links['arXiv'] if 'arXiv' in links else None
+
+      paper = Paper(id=paper_id, title=title, abstract=abstract, authors=authors,
+                    comment=conference, hit_terms=None, score=0.0, arxiv_url=arxiv_url, pdf_url=pdf_url,
+                    gs_url=create_gs_url(title), published=None, supp_url=supp_url, pub_url=pub_url)
+      papers[paper_id] = paper
   return papers
 
 
@@ -162,11 +163,12 @@ def ecva_analysis(conference='ECCV 2020'):
 
 
 ########################################################################################################################
-def oa_analysis(conference='ICCV 2021'):
+def oa_analysis(conference='ICCV 2021', conference_appendices=None):
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  conference_appendix = '%s?day=all' % conference.replace(' ', '')
-  papers = parse_openaccess(conference, conference_appendix)
+  if conference_appendices is None:
+    conference_appendices = ['%s?day=all' % conference.replace(' ', '')]
+  papers = parse_openaccess(conference, conference_appendices)
   title = '%s' % (conference)
   info = '%d papers' % len(papers)
   newsletters = [PaperCollection(conference.replace(' ', '_').lower(), title, info, datetime.now(), papers)]
@@ -219,4 +221,8 @@ def eccv_csv_analysis():
 
 ########################################################################################################################
 if __name__ == '__main__':
-  oa_analysis(conference='CVPR 2021')  
+  oa_analysis('CVPR 2020', [r'CVPR2020?day=2020-06-16', r'CVPR2020?day=2020-06-17', r'CVPR2020?day=2020-06-18'])  
+  oa_analysis('CVPR 2021')  
+  oa_analysis('CVPR 2022')  
+  oa_analysis('ICCV 2021') 
+  ecva_analysis(conference='ECCV 2020')
