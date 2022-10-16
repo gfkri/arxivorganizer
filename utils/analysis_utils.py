@@ -135,7 +135,7 @@ def parse_ecva(conference):
         title = element.text.strip() 
         links = {r.text: r.attrs['href'] for r in links.find_all('a')}
         page_url = ECVA_PAPERS_URL + element.attrs['href']
-        pub_url = ECVA_PAPERS_URL + (links['DOI'] if 'DOI' in links else element.attrs['href'])
+        pub_url = links['DOI'] if 'DOI' in links else ECVA_PAPERS_URL + element.attrs['href']
         pdf_url = (ECVA_PAPERS_URL + links['pdf']) if 'pdf' in links else None
         supp_url = (ECVA_PAPERS_URL + links['supplementary material']) if 'supplementary material' in links else None
 
@@ -151,10 +151,9 @@ def parse_ecva(conference):
 
 
 ########################################################################################################################
-def ecva_analysis():
+def ecva_analysis(conference='ECCV 2020'):
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  conference = 'ECCV 2020'
   papers = parse_ecva(conference)
   title = '%s' % (conference)
   info = '%d papers' % len(papers)
@@ -163,10 +162,9 @@ def ecva_analysis():
 
 
 ########################################################################################################################
-def oa_analysis():
+def oa_analysis(conference='ICCV 2021'):
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  conference = 'ICCV 2021'
   conference_appendix = '%s?day=all' % conference.replace(' ', '')
   papers = parse_openaccess(conference, conference_appendix)
   title = '%s' % (conference)
@@ -221,4 +219,4 @@ def eccv_csv_analysis():
 
 ########################################################################################################################
 if __name__ == '__main__':
-  ecva_analysis()
+  oa_analysis(conference='CVPR 2021')  
