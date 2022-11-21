@@ -160,12 +160,12 @@ def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last
         title, encoding = decode_header(msg['Subject'])[0]
         msg_datetime = datetime.strptime(msg['Date'], "%a, %d %b %Y %H:%M:%S %z")
 
-        if isinstance(subject, bytes):
-          subject = subject.decode(encoding)
+        if isinstance(title, bytes):
+          title = title.decode(encoding)
 
-        if np.any([kw in subject for kw in SUBJECT_SEARCH_STRING]):
-          logging.info(f"Analyzing mail with subject '{subject}' ...")
-          msg_index_dn = msg_datetime.strftime("%Y%m%d%H%M") + '_' + ''.join(subject.split(' ')[-2:])
+        if np.any([kw in title for kw in SUBJECT_SEARCH_STRING]):
+          logging.info(f"Analyzing mail with subject '{title}' ...")
+          msg_index_dn = msg_datetime.strftime("%Y%m%d%H%M") + '_' + ''.join(title.split(' ')[-2:])
 
           body = msg.get_payload(decode=True).decode()
           ids = re.findall(r"(?<=arXiv:)\d{4}\.\d{5}", body)
