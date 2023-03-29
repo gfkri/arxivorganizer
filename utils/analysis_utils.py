@@ -203,6 +203,7 @@ def pc_github_analysis():
   newsletters = [PaperCollection('pc_github_2021', title, info, datetime.now(), papers)]
   sort_and_create(output_dp, newsletters, index_dp)
 
+
 ########################################################################################################################
 def eccv_csv_analysis():
   output_dp = pathlib.Path('.') / OUTPUT_DIR
@@ -221,8 +222,9 @@ def eccv_csv_analysis():
 
 ########################################################################################################################
 if __name__ == '__main__':
+  ecva_analysis(conference='ECCV 2020')
   oa_analysis('CVPR 2020', [r'CVPR2020?day=2020-06-16', r'CVPR2020?day=2020-06-17', r'CVPR2020?day=2020-06-18'])  
   oa_analysis('CVPR 2021')  
   oa_analysis('CVPR 2022')  
   oa_analysis('ICCV 2021') 
-  ecva_analysis(conference='ECCV 2020')
+  oa_analysis('WACV 2023') 
