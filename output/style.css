@@ -1,7 +1,8 @@
 /* Style the buttons that are used to open and close the accordion panel */
 .accordion {
+  font-family: 'Quicksand', sans-serif;
   background-color: #e0e0e0;
-  color: #444;
+  color: rgb(93, 93, 93);
   cursor: pointer;
   padding: 16px;
   width: 100%;
@@ -13,24 +14,35 @@
 
 .accordion:nth-child(4n)
 {
-  background: #eee
+  background: #d2d2d2;
+}
+.accordion:nth-child(4n+1)
+{
+  background-color: #d2d2d2;
 }
 
 .title {
   color: #007800;
   font-size: 120%;
+  font-weight: 550;
 }
 
+/* 
 .authors {
-}
+} 
+*/
 
 .score {
   font-size: 105%;
+  font-weight: 550;
   color: #54abff;
 }
 
+/*
 .hit_terms {
+  color: #3b3b3b;
 }
+*/
 
 .details {
   text-align: right;
@@ -38,7 +50,7 @@
 
 /* Add a background color to the button if it is clicked on (add the .active class with JS), and when you move the mouse over it (hover) */
 .active, .accordion:hover {
-  background-color: #ccc;
+  background-color: #b4b4b4;
 }
 
 /* Style the accordion panel. Note: hidden by default */

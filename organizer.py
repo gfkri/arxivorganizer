@@ -28,9 +28,9 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
 
 logging.basicConfig(level=logging.INFO)
-PaperCollection = recordclass('PaperCollection', 'id title datetime papers')
+PaperCollection = recordclass('PaperCollection', 'id title info datetime papers')
 Paper = recordclass('Paper', 'id title abstract authors comment published '
-                             'hit_terms score arxiv_url pdf_url gs_url supp_url')
+                             'hit_terms score arxiv_url pdf_url gs_url supp_url pub_url')
 
 
 ########################################################################################################################
@@ -39,13 +39,13 @@ def create_gs_url(title):
 
 
 ########################################################################################################################
-def generate_website(fp, title, papers):
+def generate_website(fp, title, info, papers):
   env = Environment(
     loader=PackageLoader("arxivorganizer"),
     autoescape=select_autoescape()
   )
   template = env.get_template("template.html")
-  output = template.render(title=title, papers=papers)
+  output = template.render(title=title, info=info, papers=papers)
 
   with open(fp, 'w') as f:
     f.write(output)
@@ -71,7 +71,7 @@ def fetch_arxiv_info(newsletters):
       # search_string += tag
       paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
                     comment=p.comment, published=p.published, hit_terms=None, score=0.0, arxiv_url=p.entry_id,
-                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title), supp_url=None)
+                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title), supp_url=None, pub_url=None)
       papers.append(paper)
 
   cidx = 0
@@ -125,11 +125,23 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
         paper.hit_terms = hit_terms
         paper.score = result.score
         papers.append(paper)
-        logging.debug(result['title'], result['arxiv_url'], result['authors'], '%.2f' % result.score,
+        logging.debug(result['title'], result['authors'], '%.2f' % result.score,
                       '[' + ', '.join(hit_terms) + ']', sep=' | ')
+        
+    logging.debug('Adding papers, which were not returned by the search ...')
+        
+    # add papers that were not found in the search
+    found_paper_ids = set(map(lambda x:x.id, papers))
+    missing_paper_ids = col.papers.keys() - found_paper_ids
+    for pid in missing_paper_ids:
+      paper = col.papers[pid]
+      paper.hit_terms = []
+      paper.score = 0.0
+      papers.append(paper)
+      logging.debug(paper.title, paper.authors, sep=' | ')
 
     output_fn = output_dp / (col.id + '.html')
-    generate_website(output_fn, col.title, papers)
+    generate_website(output_fn, col.title, col.info, papers)
 
 
 ########################################################################################################################
@@ -157,21 +169,21 @@ def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last
       if isinstance(response, tuple):
         msg = email.message_from_bytes(response[1])
         # decode the email subject
-        subject, encoding = decode_header(msg['Subject'])[0]
+        title, encoding = decode_header(msg['Subject'])[0]
         msg_datetime = datetime.strptime(msg['Date'], "%a, %d %b %Y %H:%M:%S %z")
 
-        if isinstance(subject, bytes):
-          subject = subject.decode(encoding)
+        if isinstance(title, bytes):
+          title = title.decode(encoding)
 
-        if np.any([kw in subject for kw in SUBJECT_SEARCH_STRING]):
-          logging.info(f"Analyzing mail with subject '{subject}' ...")
-          msg_index_dn = msg_datetime.strftime("%Y%m%d%H%M") + '_' + ''.join(subject.split(' ')[-2:])
+        if np.any([kw in title for kw in SUBJECT_SEARCH_STRING]):
+          logging.info(f"Analyzing mail with subject '{title}' ...")
+          msg_index_dn = msg_datetime.strftime("%Y%m%d%H%M") + '_' + ''.join(title.split(' ')[-2:])
 
           body = msg.get_payload(decode=True).decode()
           ids = re.findall(r"(?<=arXiv:)\d{4}\.\d{5}", body)
 
-    title = subject + ' (' + msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers)' % len(ids))
-    newsletter = PaperCollection(msg_index_dn, title, msg_datetime, ids)
+    info = msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers' % len(ids))
+    newsletter = PaperCollection(msg_index_dn, title, info, msg_datetime, ids)
     newsletters.append(newsletter)
   return newsletters
 
@@ -195,11 +207,11 @@ def main():
 
     dates = [nl.datetime for nl in newsletters]
     from_date, to_date = min(dates), max(dates)
-    title = 'Newsletter Overview [' + from_date.strftime("%Y-%m-%d") + ', ' + to_date.strftime("%Y-%m-%d") + '] ' + \
-            '(%d newsletter, %d papers)' % (len(newsletters), len(papers))
+    title = 'Newsletter Overview [' + from_date.strftime("%Y-%m-%d") + ', ' + to_date.strftime("%Y-%m-%d") + ']'
+    info = '%d newsletter, %d papers' % (len(newsletters), len(papers))
 
     overview_id = 'ov_' + to_date.strftime("%Y%m%d%H%M") + ('_%dnl' % len(newsletters))
-    overview_collection = PaperCollection(id=overview_id, title=title, datetime=to_date, papers=papers)
+    overview_collection = PaperCollection(id=overview_id, title=title, info=info, datetime=to_date, papers=papers)
     newsletters.append(overview_collection)
 
   sort_and_create(output_dp, newsletters)
