@@ -127,6 +127,18 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
         papers.append(paper)
         logging.debug(result['title'], result['authors'], '%.2f' % result.score,
                       '[' + ', '.join(hit_terms) + ']', sep=' | ')
+        
+    logging.debug('Adding papers, which were not returned by the search ...')
+        
+    # add papers that were not found in the search
+    found_paper_ids = set(map(lambda x:x.id, papers))
+    missing_paper_ids = col.papers.keys() - found_paper_ids
+    for pid in missing_paper_ids:
+      paper = col.papers[pid]
+      paper.hit_terms = []
+      paper.score = 0.0
+      papers.append(paper)
+      logging.debug(paper.title, paper.authors, sep=' | ')
 
     output_fn = output_dp / (col.id + '.html')
     generate_website(output_fn, col.title, col.info, papers)
