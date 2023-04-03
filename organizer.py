@@ -145,32 +145,36 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
 
 
 ########################################################################################################################
-def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last_n_newsletter):
+def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last_n_newsletter, filter_seen=False):
   # create an IMAP4 class with SSL
   imap = imaplib.IMAP4_SSL(server_name)
 
   # authenticate
   imap.login(username, password)
-  status, messages = imap.select(mailfolder)
+  _, messages = imap.select(mailfolder)
   # total number of emails
   messages = int(messages[0])
 
   if IMAP_SERVER_SUPPORTS_SORTING:
-    status, sort_order = imap.sort('DATE', 'UTF-8', 'ALL')
+    _, sort_order = imap.sort('DATE', 'UTF-8', 'ALL')
     sort_order = sort_order[0].decode('utf-8').split(' ')
   else:
     sort_order = [str(i) for i in range(1, messages+1)]
 
   newsletters = []
   for i in range(messages - 1, messages - last_n_newsletter - 1, -1):
-    res, msg = imap.fetch(sort_order[i], '(RFC822)')
-
-    for response in msg:
+    _, msg_flags = imap.fetch(sort_order[i], '(FLAGS)')
+    seen_flag = np.any([b'FLAGS' in response and b"\\Seen" in response for response in msg_flags])
+    if filter_seen and seen_flag:
+      continue
+            
+    _, msg_header = imap.fetch(sort_order[i], '(RFC822)')
+    for response in msg_header:    
       if isinstance(response, tuple):
-        msg = email.message_from_bytes(response[1])
+        message = email.message_from_bytes(response[1])
         # decode the email subject
-        title, encoding = decode_header(msg['Subject'])[0]
-        msg_datetime = datetime.strptime(msg['Date'], "%a, %d %b %Y %H:%M:%S %z")
+        title, encoding = decode_header(message['Subject'])[0]
+        msg_datetime = datetime.strptime(message['Date'], "%a, %d %b %Y %H:%M:%S %z")
 
         if isinstance(title, bytes):
           title = title.decode(encoding)
@@ -179,12 +183,13 @@ def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last
           logging.info(f"Analyzing mail with subject '{title}' ...")
           msg_index_dn = msg_datetime.strftime("%Y%m%d%H%M") + '_' + ''.join(title.split(' ')[-2:])
 
-          body = msg.get_payload(decode=True).decode()
-          ids = re.findall(r"(?<=arXiv:)\d{4}\.\d{5}", body)
+          body = message.get_payload(decode=True).decode()
+          ids = re.findall(r"(?<=arXiv:)\d{4}\.\d{5}", body)     
 
     info = msg_datetime.strftime("%d-%m-%Y %H:%M") + (', %d papers' % len(ids))
     newsletter = PaperCollection(msg_index_dn, title, info, msg_datetime, ids)
     newsletters.append(newsletter)
+  
   return newsletters
 
 
@@ -193,7 +198,8 @@ def main():
   output_dp = pathlib.Path(OUTPUT_DIR)
 
   newsletters = fetch_newsletter_from_imap(server_name=SERVER_NAME, username=USERNAME, password=PASSWORD,
-                                           mailfolder=MAIL_FOLDER, last_n_newsletter=LAST_N_NEWSLETTERS)
+                                           mailfolder=MAIL_FOLDER, last_n_newsletter=LAST_N_NEWSLETTERS, 
+                                           filter_seen=FILTER_SEEN_MESSAGES)
   if IGNORE_ALREADY_CREATED:
     newsletters = [nl for nl in newsletters if not (output_dp / (nl.id + '.html')).exists()]
 
