@@ -8,6 +8,8 @@ import urllib
 from datetime import datetime
 from email.header import decode_header
 from functools import reduce
+from dataclasses import dataclass
+from typing import Any
 
 import arxiv
 import numpy as np
@@ -28,9 +30,34 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[1]))
 
 logging.basicConfig(level=logging.INFO)
-PaperCollection = recordclass('PaperCollection', 'id title info datetime papers')
-Paper = recordclass('Paper', 'id title abstract authors comment published '
-                             'hit_terms score arxiv_url pdf_url gs_url supp_url pub_url')
+# PaperCollection = recordclass('PaperCollection', 'id title info datetime papers')
+# Paper = recordclass('Paper', 'id title abstract authors comment published '
+#                              'hit_terms score arxiv_url pdf_url gs_url supp_url pub_url')
+
+@dataclass
+class PaperCollection:
+    collection_id: str
+    title: str
+    info: str
+    published: datetime
+    papers: list
+
+@dataclass
+class Paper:
+    """Class for keeping track of a paper."""
+    paper_id: Any
+    title: str
+    abstract: str = None 
+    authors: str = None 
+    comment: str = None
+    published: datetime = None 
+    hit_terms: list = None
+    score: float = 0.0 
+    arxiv_url: str = None 
+    pdf_url: str = None
+    gs_url: str = None 
+    supp_url: str = None 
+    pub_url: str = None
 
 
 ########################################################################################################################
@@ -69,14 +96,15 @@ def fetch_arxiv_info(newsletters):
     for p in client.results(search):
       authors = ', '.join([a.name for a in p.authors])
       # search_string += tag
-      paper = Paper(id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
-                    comment=p.comment, published=p.published, hit_terms=None, score=0.0, arxiv_url=p.entry_id,
-                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title), supp_url=None, pub_url=None)
+      paper = Paper(paper_id=p.get_short_id(), title=p.title, abstract=p.summary.replace('\n', ' '), authors=authors,
+                    comment=p.comment, published=p.published, score=0.0, arxiv_url=p.entry_id,
+                    pdf_url=p.pdf_url, gs_url=create_gs_url(p.title))
       papers.append(paper)
+
 
   cidx = 0
   for nl in newsletters:
-    nl.papers = {p.id: p for p in papers[cidx:cidx+len(nl.papers)]}
+    nl.papers = {p.paper_id: p for p in papers[cidx:cidx+len(nl.papers)]}
     cidx += len(nl.papers)
 
 
@@ -85,7 +113,7 @@ def fetch_arxiv_info(newsletters):
 def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
   # search engine initialization
   stem_ana = StemmingAnalyzer()
-  schema = Schema(id=ID(stored=True, sortable=True),
+  schema = Schema(paper_id=ID(stored=True, sortable=True),
                   title=TEXT(analyzer=stem_ana, stored=True, sortable=True, phrase=True),
                   abstract=TEXT(analyzer=stem_ana, stored=True, sortable=True, phrase=True),
                   authors=TEXT(stored=True, sortable=True, phrase=True),
@@ -103,7 +131,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
 
   # search for keywords in each newsletter and create a website
   for col in collections:
-    msg_index_dp = index_dp / col.id
+    msg_index_dp = index_dp / col.collection_id
     if msg_index_dp.exists():
       shutil.rmtree(msg_index_dp)
 
@@ -112,7 +140,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
 
     writer = ix.writer()
     for p in col.papers.values():
-      writer.add_document(id=str(p.id), title=p.title, abstract=p.abstract, authors=p.authors,
+      writer.add_document(paper_id=str(p.paper_id), title=p.title, abstract=p.abstract, authors=p.authors,
                           comment=p.comment, arxiv_url=p.arxiv_url, pdf_url=p.pdf_url)
     writer.commit()
 
@@ -121,7 +149,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
       results = searcher.search(q, limit=None, terms=True)
       for result in results:
         hit_terms = sorted(list({t[1].decode('utf-8') for t in result.matched_terms()}))
-        paper = col.papers[result['id']]
+        paper = col.papers[result['paper_id']]
         paper.hit_terms = hit_terms
         paper.score = result.score
         papers.append(paper)
@@ -131,7 +159,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
     logging.debug('Adding papers, which were not returned by the search ...')
         
     # add papers that were not found in the search
-    found_paper_ids = set(map(lambda x:x.id, papers))
+    found_paper_ids = set(map(lambda x:x.paper_id, papers))
     missing_paper_ids = col.papers.keys() - found_paper_ids
     for pid in missing_paper_ids:
       paper = col.papers[pid]
@@ -140,7 +168,7 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
       papers.append(paper)
       logging.debug(paper.title, paper.authors, sep=' | ')
 
-    output_fn = output_dp / (col.id + '.html')
+    output_fn = output_dp / (col.collection_id + '.html')
     generate_website(output_fn, col.title, col.info, papers)
 
 
@@ -201,7 +229,7 @@ def main():
                                            mailfolder=MAIL_FOLDER, last_n_newsletter=LAST_N_NEWSLETTERS, 
                                            filter_seen=FILTER_SEEN_MESSAGES)
   if IGNORE_ALREADY_CREATED:
-    newsletters = [nl for nl in newsletters if not (output_dp / (nl.id + '.html')).exists()]
+    newsletters = [nl for nl in newsletters if not (output_dp / (nl.collection_id + '.html')).exists()]
 
   fetch_arxiv_info(newsletters)
 
@@ -211,13 +239,13 @@ def main():
     for nl in newsletters:
       papers.update(nl.papers)
 
-    dates = [nl.datetime for nl in newsletters]
+    dates = [nl.published for nl in newsletters]
     from_date, to_date = min(dates), max(dates)
     title = 'Newsletter Overview [' + from_date.strftime("%Y-%m-%d") + ', ' + to_date.strftime("%Y-%m-%d") + ']'
     info = '%d newsletter, %d papers' % (len(newsletters), len(papers))
 
     overview_id = 'ov_' + to_date.strftime("%Y%m%d%H%M") + ('_%dnl' % len(newsletters))
-    overview_collection = PaperCollection(id=overview_id, title=title, info=info, datetime=to_date, papers=papers)
+    overview_collection = PaperCollection(collection_id=overview_id, title=title, info=info, published=to_date, papers=papers)
     newsletters.append(overview_collection)
 
   sort_and_create(output_dp, newsletters)
