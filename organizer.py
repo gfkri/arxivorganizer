@@ -8,9 +8,10 @@ import urllib
 from datetime import datetime
 from email.header import decode_header
 from functools import reduce
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any
 
+import json
 import arxiv
 import numpy as np
 import whoosh.query
@@ -35,17 +36,9 @@ logging.basicConfig(level=logging.INFO)
 #                              'hit_terms score arxiv_url pdf_url gs_url supp_url pub_url')
 
 @dataclass
-class PaperCollection:
-    collection_id: str
-    title: str
-    info: str
-    published: datetime
-    papers: list
-
-@dataclass
 class Paper:
     """Class for keeping track of a paper."""
-    paper_id: Any
+    paper_id: any
     title: str
     abstract: str = None 
     authors: str = None 
@@ -58,6 +51,69 @@ class Paper:
     gs_url: str = None 
     supp_url: str = None 
     pub_url: str = None
+    reviews_url: str = None
+
+    def to_dict(self):
+        data = asdict(self)
+        # Serialize datetime fields
+        if self.published:
+            data['published'] = self.published.isoformat()
+        else:
+            data['published'] = None
+        return data
+
+    @classmethod
+    def from_dict(cls, data):
+        # Deserialize datetime fields
+        if data.get('published'):
+            data['published'] = datetime.fromisoformat(data['published'])
+        else:
+            data['published'] = None
+        return cls(**data)
+
+@dataclass
+class PaperCollection:
+    collection_id: str
+    title: str
+    info: str
+    published: datetime
+    papers: dict
+
+    def to_dict(self):
+        data = asdict(self)
+        # Serialize datetime fields
+        data['published'] = self.published.isoformat()
+        # Serialize nested Paper instances in the dict
+        data['papers'] = {key: paper.to_dict() for key, paper in self.papers.items()}
+        return data
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), indent=4)
+
+    def save_to_file(self, filename):
+        """Save the PaperCollection to a JSON file."""
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=4)
+
+    @classmethod
+    def from_dict(cls, data):
+        # Deserialize datetime fields
+        data['published'] = datetime.fromisoformat(data['published'])
+        # Deserialize nested Paper instances in the dict
+        data['papers'] = {key: Paper.from_dict(paper_data) for key, paper_data in data['papers'].items()}
+        return cls(**data)
+
+    @classmethod
+    def from_json(cls, json_str):
+        data = json.loads(json_str)
+        return cls.from_dict(data)
+
+    @classmethod
+    def load_from_file(cls, filename):
+        """Load a PaperCollection from a JSON file."""
+        with open(filename, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 
 ########################################################################################################################
@@ -67,6 +123,23 @@ def create_gs_url(title):
 
 ########################################################################################################################
 def generate_website(fp, title, info, papers):
+  """
+  Generates a website with the given papers.
+  Parameters
+  ----------
+  fp : str
+    The file path where the generated website will be saved.
+  title : str
+    The title of the website.
+  info : str
+    Additional information to be included on the website.
+  papers : list
+    A list of papers to be included on the website.
+  Returns
+  -------
+  None
+  """
+  
   env = Environment(
     loader=PackageLoader("arxivorganizer"),
     autoescape=select_autoescape()
@@ -174,6 +247,8 @@ def sort_and_create(output_dp, collections, index_dp=pathlib.Path(INDEX_DIR)):
 
 ########################################################################################################################
 def fetch_newsletter_from_imap(server_name, username, password, mailfolder, last_n_newsletter, filter_seen=False):
+  
+  logging.info(f"Fetching the last {last_n_newsletter} newsletters from '{mailfolder}' ...")
   # create an IMAP4 class with SSL
   imap = imaplib.IMAP4_SSL(server_name)
 

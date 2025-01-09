@@ -9,7 +9,16 @@ from arxiv import arxiv
 from fuzzywuzzy import fuzz
 from tqdm import tqdm
 
-from config import OUTPUT_DIR, INDEX_DIR
+import logging
+
+def _init_logger():
+  logger = logging.getLogger(__file__)
+  logger.setLevel(logging.INFO)
+  return logger
+  
+_logger = _init_logger()
+
+from config import OUTPUT_DIR, INDEX_DIR, PAPER_CACHE_DIR
 from organizer import PaperCollection, sort_and_create, Paper, create_gs_url
 
 import requests
@@ -19,8 +28,9 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, str(pathlib.Path(__file__).absolute().parents[2]))
 
 logging.basicConfig(level=logging.INFO)
-OPEN_ACCESS_URL = "https://openaccess.thecvf.com/"
-ECVA_PAPERS_URL = "https://www.ecva.net/"
+OPEN_ACCESS_URL = "https://openaccess.thecvf.com"
+ECVA_PAPERS_URL = "https://www.ecva.net"
+NEURIPS_PAPERS_URL = "https://proceedings.neurips.cc"
 
 
 ########################################################################################################################
@@ -87,6 +97,7 @@ def parse_openaccess(conference, conference_appendices):
   papers = {}
   for appendix in conference_appendices:
     page = requests.get(OPEN_ACCESS_URL + appendix)
+
     soup = BeautifulSoup(page.content, "html.parser")
     results = soup.find_all("dt", {"class": "ptitle"})
     results = [r.find('a') for r in results]
@@ -96,21 +107,64 @@ def parse_openaccess(conference, conference_appendices):
       paper_id = '%05d' % idx
       pub_url = OPEN_ACCESS_URL + url
       page = requests.get(pub_url)
+      if page.status_code != 200:
+        _logger.warning(f"Could not fetch page '{pub_url}'.")
+        continue
+      
       soup = BeautifulSoup(page.content, "html.parser")
       content = soup.find("div", {"id": "content"}).find('dl', recursive=False)
-      abstract = content.find(paper_id='abstract').text.strip()
-      authors = content.find(paper_id='authors').find('i').text
+      abstract = content.find(id='abstract').text.strip()
+      authors = content.find(id='authors').find('i').text
 
       links = content.find('dd', recursive=False)
       links = {r.text: r.attrs['href'] for r in links.find_all('a', recursive=False) if 'href' in r.attrs}
-      pdf_url = (OPEN_ACCESS_URL + links['pdf'][1:]) if 'pdf' in links else None
-      supp_url = (OPEN_ACCESS_URL + links['supp'][1:]) if 'supp' in links else None
+      pdf_url = (OPEN_ACCESS_URL + links['pdf']) if 'pdf' in links else None
+      supp_url = (OPEN_ACCESS_URL + links['supp']) if 'supp' in links else None
       arxiv_url = links['arXiv'] if 'arXiv' in links else None
 
       paper = Paper(paper_id=paper_id, title=title, abstract=abstract, authors=authors,
                     comment=conference, score=0.0, arxiv_url=arxiv_url, pdf_url=pdf_url,
                     gs_url=create_gs_url(title), supp_url=supp_url, pub_url=pub_url)
       papers[paper_id] = paper
+  return papers
+
+
+########################################################################################################################
+def parse_neurips(year):
+  papers = {}
+  page = requests.get(f'{NEURIPS_PAPERS_URL}/paper_files/paper/{year}')
+  conference = f'NeurIPS {year}'
+
+  soup = BeautifulSoup(page.content, "html.parser")
+  results = soup.find_all("a", {"title": "paper title"})
+  results = {r.text: r.attrs['href'] for r in results}
+
+  for idx, (title, url) in tqdm(enumerate(results.items()), total=len(results)):
+    paper_id = '%05d' % idx
+    pub_url = NEURIPS_PAPERS_URL + url
+    page = requests.get(pub_url)
+    if page.status_code != 200:
+      _logger.warning(f"Could not fetch page '{pub_url}'.")
+      continue
+    
+    soup = BeautifulSoup(page.content, "html.parser")
+    content = soup.find("div", {"class": "col"})
+    title = content.find('h4').text
+    authors = content.find('i', recursive=True).text
+    links = content.find('div').find_all('a')
+    links = {r.text: r.attrs['href'] for r in links if 'href' in r.attrs}
+    
+    abstract_tag = soup.find('h4', text='Abstract')
+    abstract = abstract_tag.find_next('p').text.strip() if abstract_tag else ''
+    
+    pdf_url = f"{NEURIPS_PAPERS_URL}{links['Paper']}" if 'Paper' in links else None
+    supp_url = f"{NEURIPS_PAPERS_URL}{links['Supplemental']}" if 'Supplemental' in links else None
+    reviews_url = links['Reviews And Public Comment'] if 'Reviews And Public Comment' in links else None
+
+    paper = Paper(paper_id=paper_id, title=title, abstract=abstract, authors=authors,
+                  comment=conference, score=0.0, reviews_url=reviews_url, pdf_url=pdf_url,
+                  gs_url=create_gs_url(title), supp_url=supp_url, pub_url=pub_url)
+    papers[paper_id] = paper
   return papers
 
 
@@ -163,7 +217,7 @@ def parse_cvpr(conference, url, fuzzy_th=90, max_requests=50):
 
 ########################################################################################################################
 def parse_ecva(conference):
-  page = requests.get(ECVA_PAPERS_URL + 'papers.php')
+  page = requests.get(ECVA_PAPERS_URL + '/papers.php')
   soup = BeautifulSoup(page.content, "html.parser")
   results = soup.find_all("div", {"id": "content"})
 
@@ -179,14 +233,20 @@ def parse_ecva(conference):
         element = element.find('a') 
         title = element.text.strip() 
         links = {r.text: r.attrs['href'] for r in links.find_all('a')}
-        page_url = ECVA_PAPERS_URL + element.attrs['href']
+        page_url = f"{ECVA_PAPERS_URL}/{element.attrs['href']}"
         pub_url = links['DOI'] if 'DOI' in links else ECVA_PAPERS_URL + element.attrs['href']
-        pdf_url = (ECVA_PAPERS_URL + links['pdf']) if 'pdf' in links else None
-        supp_url = (ECVA_PAPERS_URL + links['supplementary material']) if 'supplementary material' in links else None
+        pdf_url = f"{ECVA_PAPERS_URL}/{links['pdf']}" if 'pdf' in links else None
+        supp_url = f"{ECVA_PAPERS_URL}/{links['supplementary material']}" if 'supplementary material' in links else None
 
         page = requests.get(page_url)
         element_soup = BeautifulSoup(page.content, "html.parser")
         abstract = element_soup.find('div', {"id": "abstract"}).text.strip()
+        
+        # remove staring and trailing quotes if present
+        if abstract.startswith('"'): 
+          abstract = abstract[1:]
+        if abstract.endswith('"'):
+          abstract = abstract[:-1]
 
         paper = Paper(paper_id=paper_id, title=title, abstract=abstract, authors=authors, comment=conference, 
                       pdf_url=pdf_url, gs_url=create_gs_url(title), supp_url=supp_url, pub_url=pub_url)
@@ -198,25 +258,71 @@ def parse_ecva(conference):
 def ecva_analysis(conference='ECCV 2020'):
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  papers = parse_ecva(conference)
-  title = '%s' % (conference)
-  info = '%d papers' % len(papers)
-  newsletters = [PaperCollection(conference.lower().replace(' ', '_'), title, info, datetime.now(), papers)]
-  sort_and_create(output_dp, newsletters, index_dp)
+  cache_dp = pathlib.Path('.') / PAPER_CACHE_DIR
+  cache_dp.mkdir(parents=True, exist_ok=True)
+  collection_id = conference.replace(' ', '_').lower()
+  cache_fn = cache_dp / f'{collection_id}.json'
+  
+  if cache_fn.exists():
+    _logger.info(f"Loading papers from cache '{cache_fn}' ...")
+    collection = PaperCollection.load_from_file(cache_fn)
+  else:
+    _logger.info(f"Fetching papers for conference '{conference}' from '{ECVA_PAPERS_URL}' ...")
+    papers = parse_ecva(conference)
+    title = '%s' % (conference)
+    info = '%d papers' % len(papers)
+    collection = PaperCollection(collection_id, title, info, datetime.now(), papers)
+    collection.save_to_file(cache_fn)
+    
+  sort_and_create(output_dp, [collection], index_dp)
 
-
+# TODO fuse the functions above and below
 ########################################################################################################################
-def oa_analysis(conference='ICCV 2021', conference_appendices=None):
+def oa_analysis(conference, conference_appendices=None):
+  if conference_appendices is None:
+    conference_appendices = ['/%s?day=all' % conference.replace(' ', '')]
+    
   output_dp = pathlib.Path('.') / OUTPUT_DIR
   index_dp = pathlib.Path('.') / INDEX_DIR
-  if conference_appendices is None:
-    conference_appendices = ['%s?day=all' % conference.replace(' ', '')]
-  papers = parse_openaccess(conference, conference_appendices)
-  title = '%s' % (conference)
-  info = '%d papers' % len(papers)
-  newsletters = [PaperCollection(conference.replace(' ', '_').lower(), title, info, datetime.now(), papers)]
-  sort_and_create(output_dp, newsletters, index_dp)
-
+  cache_dp = pathlib.Path('.') / PAPER_CACHE_DIR
+  cache_dp.mkdir(parents=True, exist_ok=True)
+  collection_id = conference.replace(' ', '_').lower()
+  cache_fn = cache_dp / f'{collection_id}.json'
+  
+  if cache_fn.exists():
+    _logger.info(f"Loading papers from cache '{cache_fn}' ...")
+    collection = PaperCollection.load_from_file(cache_fn)
+  else:
+    _logger.info(f"Fetching papers for conference '{conference}' from '{OPEN_ACCESS_URL}' ...")
+    papers = parse_openaccess(conference, conference_appendices)  
+    title = '%s' % (conference)
+    info = '%d papers' % len(papers)
+    collection = PaperCollection(collection_id, title, info, datetime.now(), papers)
+    collection.save_to_file(cache_fn)
+  
+  sort_and_create(output_dp, [collection], index_dp)
+  
+########################################################################################################################
+def neurips_analysis(year):   
+  output_dp = pathlib.Path('.') / OUTPUT_DIR
+  index_dp = pathlib.Path('.') / INDEX_DIR
+  cache_dp = pathlib.Path('.') / PAPER_CACHE_DIR
+  cache_dp.mkdir(parents=True, exist_ok=True)
+  collection_id = 'neurips_%s' % year
+  cache_fn = cache_dp / f'{collection_id}.json'
+  
+  if cache_fn.exists():
+    _logger.info(f"Loading papers from cache '{cache_fn}' ...")
+    collection = PaperCollection.load_from_file(cache_fn)
+  else:
+    _logger.info(f"Fetching papers for NeurIPS '{year}' from '{NEURIPS_PAPERS_URL}' ...")
+    title = f'NeurIPS {year}'
+    papers = parse_neurips(year)
+    info = f'{len(papers)} papers'
+    collection = PaperCollection(collection_id, title, info, datetime.now(), papers)
+    collection.save_to_file(cache_fn)
+  
+  sort_and_create(output_dp, [collection], index_dp)
 
 ########################################################################################################################
 def cvpr_analysis(conference, url):
@@ -277,10 +383,9 @@ def eccv_csv_analysis():
 
 ########################################################################################################################
 if __name__ == '__main__':
-  cvpr_analysis('CVPR 2023', 'https://cvpr2023.thecvf.com/Conferences/2023/AcceptedPapers')
-  # ecva_analysis(conference='ECCV 2020')
+  ecva_analysis('ECCV 2022')
+  # oa_analysis('CVPR 2021')
+  # oa_analysis('ICCV 2021')
+  # neurips_analysis('2023')
   # oa_analysis('CVPR 2020', [r'CVPR2020?day=2020-06-16', r'CVPR2020?day=2020-06-17', r'CVPR2020?day=2020-06-18'])  
-  # oa_analysis('CVPR 2021')  
-  # oa_analysis('CVPR 2022')  
-  # oa_analysis('ICCV 2021') 
-  # oa_analysis('WACV 2023') 
+
